@@ -1,0 +1,6 @@
+{
+  "workspace.library": ["./"],
+  "workspace.checkThirdParty": false,
+  "runtime.version": "Lua 5.1",
+  "diagnostics.globals": ["vim"]
+}
