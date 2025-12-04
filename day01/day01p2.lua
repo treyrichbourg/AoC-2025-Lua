@@ -18,6 +18,7 @@ local function spin(dir, num)
 	end
 end
 
+-- this is better :)
 local function spin_faster(dir, num)
 	num = tonumber(num)
 	local dir_num = dir == "R" and 1 or -1
@@ -34,16 +35,7 @@ end
 
 for line in util.lines("day01/input.txt") do
 	local dir, num = line:match("([LR])(%d+)")
-	spin(dir, num)
-end
-
-print("for loop: " .. zro_hits)
-pos = 50
-zro_hits = 0
-
-for line in util.lines("day01/input.txt") do
-	local dir, num = line:match("([LR])(%d+)")
 	spin_faster(dir, num)
 end
 
-print("floor: " .. zro_hits)
+print(zro_hits)
