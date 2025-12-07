@@ -50,4 +50,12 @@ function util.init_visited(grid)
 	return visited_table
 end
 
+function util.Set(list)
+	local set = {}
+	for _, v in ipairs(list) do
+		set[v] = true
+	end
+	return set
+end
+
 return util
