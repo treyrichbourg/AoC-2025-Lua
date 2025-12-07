@@ -37,4 +37,17 @@ function util.input_to_grid(path)
 	return grid
 end
 
+function util.init_visited(grid)
+	local visited_table = {}
+	local rows = #grid
+	local columns = #grid[1]
+	for r = 1, rows do
+		visited_table[r] = {}
+		for c = 1, columns do
+			visited_table[r][c] = false
+		end
+	end
+	return visited_table
+end
+
 return util
