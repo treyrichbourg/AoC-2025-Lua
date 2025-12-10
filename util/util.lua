@@ -2,7 +2,7 @@
 
 local util = {}
 
--- return input as a table
+-- return input as a table with a row of lines
 function util.input_to_table(path)
 	local f = io.open(path)
 	if not f then
@@ -24,6 +24,7 @@ function util.lines(path)
 	return io.lines(path)
 end
 
+-- return input as a grid
 function util.input_to_grid(path)
 	local grid = {}
 	local sub = string.sub
@@ -31,6 +32,21 @@ function util.input_to_grid(path)
 		local row = {}
 		for i = 1, #line do
 			row[i] = sub(line, i, i)
+		end
+		grid[#grid + 1] = row
+	end
+	return grid
+end
+
+-- return input as a table where rows are whitespace delimited
+function util.input_to_table_space(path)
+	local grid = {}
+	local lines = io.lines
+	local gmatch = string.gmatch
+	for line in lines(path) do
+		local row = {}
+		for group in gmatch(line, "%S+") do
+			row[#row + 1] = group
 		end
 		grid[#grid + 1] = row
 	end
