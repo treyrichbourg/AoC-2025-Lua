@@ -38,6 +38,21 @@ function util.input_to_grid(path)
 	return grid
 end
 
+-- return input as a grid with whitespace replaced by 0s
+function util.input_to_grid_fill_zeroes(path)
+	local grid = {}
+	local sub = string.sub
+	for line in io.lines(path) do
+		local row = {}
+		line = line:gsub("%s", "0")
+		for i = 1, #line do
+			row[i] = sub(line, i, i)
+		end
+		grid[#grid + 1] = row
+	end
+	return grid
+end
+
 -- return input as a table where rows are whitespace delimited
 function util.input_to_table_space(path)
 	local grid = {}
@@ -51,6 +66,20 @@ function util.input_to_table_space(path)
 		grid[#grid + 1] = row
 	end
 	return grid
+end
+
+-- transpose table like a grid matrix
+function util.transpose_table(table)
+	local rows = #table
+	local columns = #table[1]
+	local transposed = {}
+	for c = 1, columns do
+		transposed[c] = {}
+		for r = 1, rows do
+			transposed[c][r] = table[r][c]
+		end
+	end
+	return transposed
 end
 
 function util.init_visited(grid)
@@ -72,6 +101,10 @@ function util.Set(list)
 		set[v] = true
 	end
 	return set
+end
+
+function util.strip(s)
+	return s:gsub("^%s*(.-)%s*$", "%1")
 end
 
 return util
