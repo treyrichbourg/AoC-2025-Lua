@@ -107,4 +107,9 @@ function util.strip(s)
 	return s:gsub("^%s*(.-)%s*$", "%1")
 end
 
+-- check if grid coord is in bounds of grid
+function util.in_bounds(r, c, max_r, max_c)
+	return r >= 1 and r <= max_r and c >= 1 and c <= max_c
+end
+
 return util
