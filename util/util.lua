@@ -112,4 +112,12 @@ function util.in_bounds(r, c, max_r, max_c)
 	return r >= 1 and r <= max_r and c >= 1 and c <= max_c
 end
 
+function util.split(s, d)
+	local parts = {}
+	for part in s:gmatch("([^" .. d .. "]+)") do
+		parts[#parts + 1] = part
+	end
+	return parts
+end
+
 return util
