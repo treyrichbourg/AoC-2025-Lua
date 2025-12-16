@@ -106,7 +106,7 @@ local function raycast(grid)
 	end
 end
 
--- simple bfs
+-- simple DFS
 local function flood_fill(grid, inner)
 	local w = #grid[1]
 	local h = #grid
@@ -116,7 +116,7 @@ local function flood_fill(grid, inner)
 	end
 	local queue = { inner }
 	while #queue > 0 do
-		local curr = table.remove(queue, 1)
+		local curr = table.remove(queue)
 		for i = 1, #dirs do
 			local nr = curr.y + dirs[i].y
 			local nc = curr.x + dirs[i].x
