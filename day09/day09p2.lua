@@ -1,8 +1,10 @@
 local util = require("util.util")
-local path = "day09/example.txt"
+local path = "day09/input.txt"
 local start = os.clock()
 
 local result = 0
+local lo = math.min
+local hi = math.max
 
 local function parse(p)
 	local tiles = {}
@@ -73,11 +75,11 @@ local function rasterize(grid, tiles)
 		local a = tiles[i]
 		local b = tiles[i % #tiles + 1]
 		if a.x == b.x then
-			for y = math.min(a.y, b.y), math.max(a.y, b.y) do
+			for y = lo(a.y, b.y), hi(a.y, b.y) do
 				grid[y][a.x] = "#"
 			end
 		elseif a.y == b.y then
-			for x = math.min(a.x, b.x), math.max(a.x, b.x) do
+			for x = lo(a.x, b.x), hi(a.x, b.x) do
 				grid[a.y][x] = "#"
 			end
 		end
@@ -90,13 +92,15 @@ local function raycast(grid)
 		for x = 1, #grid[1] do
 			if grid[y][x] == "." then
 				local hits = 0
-				local prev = "."
-				for i = x, 1, -1 do
+				for i = x - 1, 1, -1 do
 					local curr = grid[y][i]
-					if prev == "." and curr ~= prev then
-						hits = hits + 1
+					if curr == "#" then
+						local up = (y > 1) and grid[y - 1][i] or "."
+						local down = (y < #grid) and grid[y + 1][i] or "."
+						if up == "#" and down == "#" then
+							hits = hits + 1
+						end
 					end
-					prev = curr
 				end
 				if (hits % 2) == 1 then
 					return { x = x, y = y }
@@ -108,6 +112,7 @@ end
 
 -- simple DFS
 local function flood_fill(grid, inner)
+	local table_remove = table.remove
 	local w = #grid[1]
 	local h = #grid
 	local dirs = { { x = -1, y = 0 }, { x = 0, y = 1 }, { x = 1, y = 0 }, { x = 0, y = -1 } }
@@ -116,7 +121,7 @@ local function flood_fill(grid, inner)
 	end
 	local queue = { inner }
 	while #queue > 0 do
-		local curr = table.remove(queue)
+		local curr = table_remove(queue)
 		for i = 1, #dirs do
 			local nr = curr.y + dirs[i].y
 			local nc = curr.x + dirs[i].x
@@ -130,39 +135,89 @@ local function flood_fill(grid, inner)
 	end
 end
 
-local tiles = parse(path)
-local w = 0
-local h = 0
-for _, t in ipairs(tiles) do
-	if t.x > w then
-		w = t.x
+-- build prefix sum of grid
+-- converts grid to 0/1 and creates a sum for each
+-- coordinate using sum of left/up/itself
+local function make_prefix(grid)
+	local prefix = {}
+	local h, w = #grid, #grid[1]
+	for y = 1, h do
+		prefix[y] = {}
+		for x = 1, w do
+			local val = (grid[y][x] == "#") and 1 or 0
+			local up = (y > 1) and prefix[y - 1][x] or 0
+			local left = (x > 1) and prefix[y][x - 1] or 0
+			local diag = (y > 1 and x > 1) and prefix[y - 1][x - 1] or 0
+			prefix[y][x] = val + up + left - diag -- remove top left because it is added twice implicitly
+		end
 	end
-	if t.y > h then
-		h = t.y
-	end
-end
-local grid = make_grid(w, h)
-rasterize(grid, tiles)
-local inner = raycast(grid)
-flood_fill(grid, inner)
-for i in ipairs(grid) do
-	print(table.concat(grid[i]))
+	return prefix
 end
 
--- for i = 1, #tiles do
--- 	for j = i + 1, #tiles do
--- 		local tile1 = tiles[i]
--- 		local tile2 = tiles[j]
--- 		if check_interior(tile1, tile2) then
--- 			local width = math.abs(tile2.x - tile1.x) + 1
--- 			local height = math.abs(tile2.y - tile1.y) + 1
--- 			local area = width * height
--- 			if area > result then
--- 				result = area
--- 			end
--- 		end
+-- original brute force check
+local function check_bounds(grid, a, b)
+	for y = lo(a.y, b.y), hi(a.y, b.y) do
+		for x = lo(a.x, b.x), hi(a.x, b.x) do
+			if grid[y][x] == "." then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+-- prefix sum is way faster
+local function check_bounds_prefix(prefix, a, b)
+	local y1, y2 = lo(a.y, b.y), hi(a.y, b.y)
+	local x1, x2 = lo(a.x, b.x), hi(a.x, b.x)
+	local total = prefix[y2][x2]
+		- ((y1 > 1) and prefix[y1 - 1][x2] or 0) -- subject rows above check
+		- ((x1 > 1) and prefix[y2][x1 - 1] or 0) -- subject columns to the left
+		+ ((y1 > 1 and x1 > 1) and prefix[y1 - 1][x1 - 1] or 0) -- previous 2 removes top-left twice so we add it back
+	local area = (x2 - x1 + 1) * (y2 - y1 + 1)
+	return total == area
+end
+
+local tiles = parse(path)
+-- used this for grid size on example before compression
+-- local w = 0
+-- local h = 0
+-- for _, t in ipairs(tiles) do
+-- 	if t.x > w then
+-- 		w = t.x
+-- 	end
+-- 	if t.y > h then
+-- 		h = t.y
 -- 	end
 -- end
 
+local squished = compress(tiles)
+
+local grid = make_grid(#squished.x_list, #squished.y_list)
+rasterize(grid, squished.tiles)
+local inner = raycast(grid)
+flood_fill(grid, inner)
+for i in ipairs(grid) do
+	io.write(table.concat(grid[i]), "\n")
+end
+print(inner.x, inner.y)
+local prefix = make_prefix(grid)
+
+for i = 1, #tiles do
+	for j = i + 1, #tiles do
+		local a = { x = squished.x_map[tiles[i].x], y = squished.y_map[tiles[i].y] }
+		local b = { x = squished.x_map[tiles[j].x], y = squished.y_map[tiles[j].y] }
+		if check_bounds_prefix(prefix, a, b) then
+			local width = math.abs(tiles[i].x - tiles[j].x) + 1
+			local height = math.abs(tiles[i].y - tiles[j].y) + 1
+			local area = width * height
+			if area > result then
+				result = area
+			end
+		end
+	end
+end
+
 local stop = os.clock()
+print(result)
 print(string.format("Time: %.6f", stop - start))
