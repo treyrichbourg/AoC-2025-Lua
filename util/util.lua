@@ -120,4 +120,8 @@ function util.split(s, d)
 	return parts
 end
 
+function util.strip_outer(s)
+	return s:sub(2, -2)
+end
+
 return util
