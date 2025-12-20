@@ -5,7 +5,6 @@ local path = "day10/input.txt"
 local result = 0
 
 local strip_outer = util.strip_outer
-local table_remove = table.remove
 local to_number = tonumber
 
 local function get_input(p)
@@ -52,8 +51,10 @@ local function bfs_bb(row)
 	local buttons = row.buttons
 	local queue = { start_state }
 	local visited = {}
-	while #queue > 0 do
-		local curr = table_remove(queue, 1)
+	local head = 1
+	while head <= #queue do
+		local curr = queue[head]
+		head = head + 1
 		local curr_state, d = curr.state, curr.d
 		local n = to_binary(curr_state)
 		if n == desired then
@@ -70,8 +71,8 @@ local function bfs_bb(row)
 				for j = 1, #buttons[b] do
 					local index = buttons[b][j]
 					new_state[index] = 1 - new_state[index]
-					queue[#queue + 1] = { state = new_state, d = d + 1 }
 				end
+				queue[#queue + 1] = { state = new_state, d = d + 1 }
 			end
 		end
 	end
