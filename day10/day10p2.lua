@@ -58,37 +58,68 @@ local function swap_rows(A, i, j, b)
 	b[i], b[j] = b[j], b[i]
 end
 
-local function to_echelon(A, b)
+local function pivot_candidate(A, c, pivot_row)
+	local rows = #A
+	for r = pivot_row, rows do
+		if A[r][c] ~= 0 then
+			return true
+		end
+	end
+	return false
+end
+
+local function to_rref(A, b)
 	local rows = #A
 	local columns = #A[1]
-	local pivot_row = 1
+
+	local column_perm = {}
 	for c = 1, columns do
+		column_perm[c] = c
+	end
+
+	local pivots = 0
+	local pivot_row = 1
+
+	local c = 1
+	while c <= columns do
 		local pivot = nil
 		local min_val = nil
 		for r = pivot_row, rows do
-			if A[r][c] ~= 0 then
-				local abs_val = abs(A[r][c])
-				if not min_val or abs_val < min_val then
-					min_val = abs_val
+			local v = A[r][c]
+			if v ~= 0 then
+				local av = abs(v)
+				--Since we're only dealing with integers we want to pivot
+				--regardless of negative or positive.
+				if not min_val or av < min_val then
+					min_val = av
 					pivot = r
 				end
 			end
 		end
+
 		if pivot then
+			pivots = pivots + 1
 			swap_rows(A, pivot_row, pivot, b)
 			local pivot_val = A[pivot_row][c]
+
 			-- reduce
 			for r = 1, rows do
 				if r ~= pivot_row then
+					-- Reduce subsequent rows to 0. If the column in the row being reduced
+					-- becomes smaller than the pivot row we want to pivot again and
+					-- continue to reduce. Basically finding the gcd of the values
+					-- in the pivot row column and the column of the row being reduced.
 					while A[r][c] ~= 0 do
 						if abs(A[r][c]) < abs(A[pivot_row][c]) then
 							swap_rows(A, r, pivot_row, b)
 							pivot_val = A[pivot_row][c]
 						end
+
 						local factor = floor(A[r][c] / pivot_val)
 						if factor == 0 then
 							factor = 1
 						end
+
 						for k = 1, columns do
 							A[r][k] = A[r][k] - factor * A[pivot_row][k]
 						end
@@ -97,8 +128,43 @@ local function to_echelon(A, b)
 				end
 			end
 			pivot_row = pivot_row + 1
+			c = c + 1
+		else
+			-- if there is no pivot push column to the right
+			local swapped = false
+			for k = c + 1, columns do
+				if pivot_candidate(A, k, pivot_row) then
+					for r = 1, rows do
+						A[r][c], A[r][k] = A[r][k], A[r][c]
+					end
+					column_perm[c], column_perm[k] = column_perm[k], column_perm[c]
+					swapped = true
+					break
+				end
+			end
+			if not swapped then
+				c = c + 1
+			end
 		end
 	end
+	return pivots, column_perm
+end
+
+local function get_free_vars(A)
+	local rows, columns = #A, #A[1]
+	local free_vars = {}
+	for c = 1, columns do
+		local ones = 0
+		for r = 1, rows do
+			if A[r][c] ~= 0 then
+				ones = ones + 1
+			end
+		end
+		if ones ~= 1 then
+			free_vars[#free_vars + 1] = c
+		end
+	end
+	return free_vars
 end
 
 local input = get_input(path)
@@ -124,11 +190,12 @@ for _, row in ipairs(input) do
 	for r = 1, #A do
 		io.write("Row: ", r, " ", table.concat(A[r]), " | ", b[r], "\n")
 	end
-	to_echelon(A, b)
+	to_rref(A, b)
 	io.write("\n")
 	for r = 1, #A do
 		io.write("Row: ", r, " ", table.concat(A[r]), " | ", b[r], "\n")
 	end
+	io.write("\n", "---", "\n")
 end
 
 local stop = os.clock()
