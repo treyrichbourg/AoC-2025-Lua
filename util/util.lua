@@ -124,4 +124,20 @@ function util.strip_outer(s)
 	return s:sub(2, -2)
 end
 
+function util.to_positive(i)
+	return i < 0 and -i or i
+end
+
+function util.gcd(a, b)
+	while b ~= 0 do
+		a, b = b, a % b
+	end
+	return math.abs(a)
+end
+
+function util.lcm(a, b)
+	local g = util.gcd(a, b)
+	return math.abs(a) / g * math.abs(b)
+end
+
 return util
