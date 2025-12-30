@@ -135,9 +135,21 @@ function util.gcd(a, b)
 	return math.abs(a)
 end
 
-function util.lcm(a, b)
+function util.get_lcm(a, b)
 	local g = util.gcd(a, b)
 	return math.abs(a) / g * math.abs(b)
+end
+
+function util.mod(a, m)
+	return ((a % m) + m) % m
+end
+
+function util.idiv(a, b)
+	if (a * b) >= 0 then
+		return math.floor(a / b)
+	else
+		return math.ceil(a / b)
+	end
 end
 
 return util

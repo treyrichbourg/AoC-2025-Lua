@@ -1,13 +1,23 @@
 local util = require("util.util")
 
+---@class BasisV
+---@field limit number
+---@field cost number
+---@field coeffs number[]
+
+---@class Subspace
+---@field rank number
+---@field nullity number
+---@field lcm number
+---@field rhs number[]
+---@field basis BasisV[]
+
 local start = os.clock()
-local path = "day10/input.txt"
-local result = math.huge
-local total_result = 0
+local path = "day10/example.txt"
+local result = 0
 
 local strip_outer = util.strip_outer
-local gcd = util.gcd
-local lcm = util.lcm
+local get_lcm = util.get_lcm
 local to_positive = util.to_positive
 local to_number = tonumber
 local floor = math.floor
@@ -16,8 +26,6 @@ local abs = math.abs
 local min = math.min
 local max = math.max
 
--- Hermite Normal Form
--- Ax = b
 local function get_input(p)
 	local input = {}
 	for line in util.lines(p) do
@@ -60,302 +68,296 @@ local function get_A(input)
 	return A
 end
 
-local function swap_rows(A, i, j, b)
+local function swap_rows(A, i, j)
 	A[i], A[j] = A[j], A[i]
-	b[i], b[j] = b[j], b[i]
 end
 
--- used in to_rref which isn't used anymore
--- local function pivot_candidate(A, c, pivot_row)
--- 	local rows = #A
--- 	for r = pivot_row, rows do
--- 		if A[r][c] ~= 0 then
--- 			return r
--- 		end
--- 	end
--- 	return nil
--- end
+-- Weird Guassian-ish/HNF-ish style elimination.
+-- Keeping everything as integer math but going to
+-- permute columns during elimination to help build
+-- null space for solving.
+---return @Subspace
+local function eliminate(input)
+	local rows = #input.joltages
+	local columns = #input.buttons
+	local A = get_A(input)
+	local b = input.joltages
 
--- local function pivot_candidate2(A, c, pivot_row, min_abs)
--- 	local rows = #A
--- 	for r = pivot_row, rows do
--- 		if A[r][c] ~= 0 and abs(A[r][c]) < min_abs then
--- 			min_abs = abs(A[r][c])
--- 			return r, min_abs
--- 		end
--- 	end
--- 	return nil, min_abs
--- end
+	-- append b to A to ensure everything is mutated together. Previously
+	-- kept these separate but it was bug prone if I forgot to adjust b
+	for r = 1, rows do
+		A[r][columns + 1] = b[r]
+	end
 
--- Close to Hermite Normal Form except no row above/col right of pivot/b
--- mod math. That would kill the b numbers we need to solve for.
-local function hnf(A, b)
-	local rows = #A
-	local columns = #A[1]
-	local pivot_rows = {}
-	local pivot_cols = {}
-	local free_vars = {}
+	-- adding a limit row to the bottom of A to track bounds for free_vars
+	local limit_row = {}
+	for c = 1, columns do
+		local limit = math.huge
+		for _, r in ipairs(input.buttons[c]) do
+			limit = min(limit, input.joltages[r])
+		end
+		limit_row[c] = limit
+	end
+	A[rows + 1] = limit_row
 
-	local pivot_row = 1
-	local pivot_col = 1
+	-- total row/col indexes including rhs and mod
+	local rhs_c = #A[1]
+	local limit_r = #A
 
-	-- find a pivot candidate
-	while pivot_row <= rows and pivot_col <= columns do
+	local rank = 1
+	local last = columns
+	while rank < rows and rank < last do
 		local pivot = nil
 		local min_abs = math.huge
-		-- pivot, min_abs = pivot_candidate(A, pivot_col, pivot_row, min_abs)
-		for r = pivot_row, rows do
-			local v = A[r][pivot_col]
+		for r = rank, rows do
+			local v = A[r][rank]
 			if v ~= 0 and abs(v) < min_abs then
-				pivot = r
 				min_abs = abs(v)
+				pivot = r
 			end
 		end
 
-		-- if no pivot in column then we mark those as free variables
-		if not pivot then
-			free_vars[#free_vars + 1] = pivot_col
-			pivot_col = pivot_col + 1
-		else
-			pivot_cols[#pivot_cols + 1] = pivot_col
-			pivot_rows[#pivot_rows + 1] = pivot_row
-			swap_rows(A, pivot_row, pivot, b)
-
-			if A[pivot_row][pivot_col] < 0 then
-				for c = 1, columns do
-					A[pivot_row][c] = to_positive(A[pivot_row][c])
+		if pivot then
+			swap_rows(A, rank, pivot)
+			local pv = A[rank][rank]
+			-- pivot must be positive, need to apply to
+			-- entire row + rhs
+			if pv < 0 then
+				for c = rank, rhs_c do
+					A[rank][c] = to_positive(A[rank][c])
 				end
-				b[pivot_row] = to_positive(b[pivot_row])
+				pv = -pv
 			end
 
 			for r = 1, rows do
-				if r ~= pivot_row and A[r][pivot_col] ~= 0 then
-					local g = gcd(A[r][pivot_col], A[pivot_row][pivot_col])
-					local m = A[r][pivot_col] / g
-					local n = A[pivot_row][pivot_col] / g
+				if r ~= rank then
+					local coeff = A[r][rank]
+					if coeff ~= 0 then
+						print(coeff)
+						print(pv)
+						local l = abs(coeff)
+						local lcm = get_lcm(l, pv)
+						local m = util.idiv(lcm, l)
+						local n = util.idiv(lcm / pivot * (coeff >= 0 and 1 or -1), 1)
 
-					for c = 1, columns do
-						A[r][c] = n * A[r][c] - m * A[pivot_row][c]
+						for c = 1, rhs_c do
+							A[r][c] = m * A[r][c] - n * A[rank][c]
+						end
 					end
-					b[r] = n * b[r] - m * b[pivot_row]
 				end
 			end
-
-			pivot_row = pivot_row + 1
-			pivot_col = pivot_col + 1
+			rank = rank + 1
+		else
+			-- column permutation
+			last = last - 1
+			for r = 1, limit_r do
+				A[r][rank], A[r][last + 1] = A[r][last + 1], A[r][rank]
+			end
 		end
 	end
-	for c = pivot_col, columns do
-		free_vars[#free_vars + 1] = c
+
+	-- get lcm for pivots and scale
+	local L = 1
+	for p = 1, rank do
+		L = get_lcm(L, abs(A[p][p]))
 	end
 
-	return pivot_rows, pivot_cols, free_vars
-end
+	for p = 1, rank do
+		local q = L / A[p][p]
+		for c = rank, rhs_c do
+			A[p][c] = A[p][c] * q
+		end
+	end
 
--- This works but isn't true HNR. I'm doing procedural reduction here
--- as I initially worked out how the math functions. Required me to
--- track column permutations as I shifted and while initially easier
--- to follow it made solving a bit more obtuse.
--- local function to_rref(A, b)
--- 	local rows = #A
--- 	local columns = #A[1]
---
--- 	local column_perm = {}
--- 	for c = 1, columns do
--- 		column_perm[c] = c
--- 	end
---
--- 	local pivots = 0
--- 	local pivot_row = 1
---
--- 	local c = 1
--- 	while c <= columns do
--- 		local pivot = nil
--- 		local min_val = nil
--- 		for r = pivot_row, rows do
--- 			local v = A[r][c]
--- 			if v ~= 0 then
--- 				local av = abs(v)
--- 				--Since we're only dealing with integers we want to pivot
--- 				--regardless of negative or positive.
--- 				if not min_val or av < min_val then
--- 					min_val = av
--- 					pivot = r
--- 				end
--- 			end
--- 		end
---
--- 		if pivot then
--- 			pivots = pivots + 1
--- 			swap_rows(A, pivot_row, pivot, b)
--- 			local pivot_val = A[pivot_row][c]
---
--- 			-- reduce
--- 			for r = 1, rows do
--- 				if r ~= pivot_row then
--- 					-- Reduce subsequent rows to 0. If the column in the row being reduced
--- 					-- becomes smaller than the pivot row we want to pivot again and
--- 					-- continue to reduce. Basically finding the gcd of the values
--- 					-- in the pivot row column and the column of the row being reduced.
--- 					while A[r][c] ~= 0 do
--- 						if abs(A[r][c]) < abs(A[pivot_row][c]) then
--- 							swap_rows(A, r, pivot_row, b)
--- 							pivot_val = A[pivot_row][c]
--- 						end
---
--- 						local factor = floor(A[r][c] / pivot_val)
--- 						if factor == 0 then
--- 							factor = 1
--- 						end
---
--- 						for k = 1, columns do
--- 							A[r][k] = A[r][k] - factor * A[pivot_row][k]
--- 						end
--- 						b[r] = b[r] - factor * b[pivot_row]
--- 					end
--- 				end
--- 			end
--- 			pivot_row = pivot_row + 1
--- 			c = c + 1
--- 		else
--- 			-- if there is no pivot push column to the right
--- 			local swapped = false
--- 			for k = c + 1, columns do
--- 				if pivot_candidate(A, k, pivot_row) then
--- 					for r = 1, rows do
--- 						A[r][c], A[r][k] = A[r][k], A[r][c]
--- 					end
--- 					column_perm[c], column_perm[k] = column_perm[k], column_perm[c]
--- 					swapped = true
--- 					break
--- 				end
--- 			end
--- 			if not swapped then
--- 				c = c + 1
--- 			end
--- 		end
--- 	end
--- 	return pivots, column_perm
--- end
+	-- free variables
+	local nullity = columns - rank
+
+	local rhs = {}
+	for r = 1, rows do
+		rhs[r] = A[r][rhs_c]
+	end
+
+	-- Basis vector handles free variable permutation much cleaner
+	-- than my previous column_perm {}.
+	local basis = {}
+	for c = 1, nullity do
+		local limit = A[limit_r][rank + c] -- original limit for free variable
+		local coeffs = {} -- free_var coefficients per row
+		for r = 1, rank do
+			coeffs[r] = A[r][rank + c]
+		end
+		local sum = 0
+		for i = 1, rank do
+			sum = sum + coeffs[i]
+		end
+		local cost = L - sum
+		basis[#basis + 1] = {
+			limit = limit,
+			cost = cost,
+			coeffs = coeffs,
+		}
+	end
+
+	io.write("\n")
+	for r = 1, limit_r do
+		io.write("Row: ", r, " ", table.concat(A[r]), "\n")
+	end
+	return {
+		rank = rank,
+		nullity = nullity,
+		lcm = L,
+		rhs = rhs,
+		basis = basis,
+	}
+end
 
 -- Using recursive dfs to brute force solutions using constraints
 -- set by free variables after the HNF style elimination.
-local function recursive_dfs(A, b, pivot_cols, free_vars, idx, x)
-	if idx > #free_vars then
-		local sum = 0
-		local pvs = {}
-		for i, pc in ipairs(pivot_cols) do
-			local pr = i
-			local rhs = b[pr]
-			for _, fc in ipairs(free_vars) do
-				rhs = rhs - A[pr][fc] * x[fc]
-			end
-			local coeff = A[pr][pc]
-			if rhs % coeff ~= 0 then
-				return
-			end
-			local val = rhs / coeff
-			if val < 0 then
-				return
-			end
-			pvs[pc] = val
-		end
-
-		for _, v in pairs(x) do
-			sum = sum + v
-		end
-		for _, v in pairs(pvs) do
-			sum = sum + v
-		end
-
-		result = min(result, sum)
-		return
+---@param subspace Subspace
+---@param rhs number[]
+---@param remaining number[]
+---@param pivot_total number
+local function recursive_dfs(subspace, rhs, remaining, pivot_total)
+	local rank = subspace.rank
+	local temp_rhs = {}
+	for i = 1, #rhs do
+		temp_rhs[i] = rhs[i]
 	end
 
-	local fc = free_vars[idx]
-	local lower, upper = 0, 100
-	for i = 1, #pivot_cols do
-		-- local pc = pivot_cols[i]
-		local pr = i
-		local coeff = A[pr][fc]
-		if coeff ~= 0 then
-			local rhs = b[pr]
-
-			for j = 1, idx - 1 do
-				local prev_c = free_vars[j]
-				rhs = rhs - A[pr][prev_c] * x[prev_c]
-			end
-
-			if coeff > 0 then
-				upper = min(upper, floor(rhs / coeff))
-			elseif coeff < 0 then
-				lower = max(lower, ceil(rhs / coeff))
+	-- adjust any negative free_var coefficients
+	for _, i in ipairs(remaining) do
+		local free_var = subspace.basis[i]
+		for r = 1, rank do
+			local v = free_var.coeffs[r]
+			if v < 0 then
+				temp_rhs[r] = temp_rhs[r] - v * free_var.limit
 			end
 		end
 	end
 
-	for v = lower, upper do
-		x[fc] = v
-		recursive_dfs(A, b, pivot_cols, free_vars, idx + 1, x)
-		x[fc] = nil
+	-- using limit row to set upper/lower bounds where before I just set
+	-- arbitrarily high values to initialize.
+	local min_size, min_index, global_lower, global_upper = math.huge, nil, 0, 0
+	for _, i in ipairs(remaining) do
+		local free_var = subspace.basis[i]
+		local lower, upper = 0, free_var.limit
+		for r = 1, rank do
+			local v = free_var.coeffs[r]
+			local rhs_v = temp_rhs[r]
+			if v > 0 then
+				upper = min(upper, floor(rhs_v / v))
+			elseif v < 0 then
+				lower = max(lower, ceil((rhs_v + v * free_var.limit + v + 1) / v))
+			end
+		end
+		if upper >= lower then
+			local size = upper - lower + 1
+			if size > 0 and size < min_size then
+				min_size, min_index, global_lower, global_upper = size, i, lower, upper
+			end
+		end
 	end
+
+	if not min_index then
+		print("failing on min_index")
+		return nil
+	end
+
+	-- adjust remaining and recurse until solved
+	local new_remaining = {}
+	for _, i in ipairs(remaining) do
+		if i ~= min_index then
+			new_remaining[#new_remaining + 1] = i
+		end
+	end
+
+	local free_var = subspace.basis[min_index]
+	local coeffs, cost, lcm = free_var.coeffs, free_var.cost, subspace.lcm
+	if #new_remaining > 0 then
+		--local adjusted_rhs = {}
+		--for r=1, rank do
+		--  adjusted_rhs[r] = temp_rhs[r] - (global_lower - 1) * coeffs[r]
+		--end
+		for r = 1, rank do
+			temp_rhs[r] = temp_rhs[r] - (global_lower - 1) * coeffs[r]
+		end
+		local best = math.huge
+		for n = global_lower, global_upper do
+			local next_rhs = {}
+			for r = 1, rank do
+				next_rhs[r] = temp_rhs[r] - n * coeffs[r]
+			end
+			local res = recursive_dfs(subspace, next_rhs, new_remaining, pivot_total + n * cost)
+			if res and res < best then
+				best = res
+			end
+		end
+		if best == math.huge then
+			print("failing on best")
+			return nil
+		end
+		return best
+	else
+		local iter, step
+		if cost >= 0 then
+			iter, step = global_lower, 1
+		else
+			iter, step = global_upper, -1
+		end
+		local bound = cost >= 0 and global_upper or global_lower
+		while (step > 0 and iter <= bound) or (step < 0 and iter >= bound) do
+			local ok = true
+			for r = 1, rank do
+				if (temp_rhs[r] - iter * coeffs[r]) % lcm ~= 0 then
+					ok = false
+					break
+				end
+			end
+			if ok then
+				return (pivot_total + iter * cost) / lcm
+			end
+			iter = iter + step
+		end
+		return nil
+	end
+	-- for n = global_lower, global_upper do
+	-- 	local ok = true
+	-- 	for r = 1, rank do
+	-- 		if util.mod(temp_rhs[r] - n * coeffs[r], lcm) ~= 0 then
+	-- 			ok = false
+	-- 			break
+	-- 		end
+	-- 	end
+	-- 	if ok then
+	-- 		return (pivot_total + n * cost) / lcm
+	-- 	end
+	-- end
+	-- print("failing on else")
+	-- return nil
 end
 
-local function solve(A, b, pivot_cols, free_vars)
-	local x = {}
-	--if #free_vars == 0 then
-	--	if #free_vars == 0 then
-	--		-- Fully determined system: back-substitution
-	--		local n = #pivot_cols
-	--		local v = {}
-	--		for i = n, 1, -1 do
-	--			local r = i
-	--			local c = pivot_cols[i]
-	--			local rhs = b[r]
+---@param subspace Subspace
+local function solve(subspace)
+	local rank = subspace.rank
+	local nullity = subspace.nullity
+	local lcm = subspace.lcm
+	local rhs = subspace.rhs
+	local pivot_total = 0
+	for i = 1, rank do
+		pivot_total = pivot_total + rhs[i]
+	end
 
-	--			-- subtract contributions of pivot vars already solved below
-	--			for j = i + 1, n do
-	--				local cj = pivot_cols[j]
-	--				rhs = rhs - A[r][cj] * v[cj]
-	--			end
-
-	--			local coeff = A[r][c]
-	--			if rhs % coeff ~= 0 then
-	--				return -- no integer solution
-	--			end
-
-	--			local val = rhs / coeff
-	--			if val < 0 then
-	--				return -- no non-negative solution
-	--			end
-
-	--			v[c] = val
-	--		end
-
-	--		-- sum all pivot values
-	--		local sum = 0
-	--		for _, val in pairs(v) do
-	--			sum = sum + val
-	--		end
-	--		result = min(result, sum)
-	--	end
-	--	--local sum = 0
-	--	--for i, pc in ipairs(pivot_cols) do
-	--	--	local pr = i
-	--	--	local rhs = b[pr]
-	--	--	local coeff = A[pr][pc]
-	--	--	if coeff == 0 or rhs % coeff ~= 0 then
-	--	--		return
-	--	--	end
-	--	--	local v = rhs / coeff
-	--	--	if v < 0 then
-	--	--		return
-	--	--	end
-	--	--	sum = sum + v
-	--	--end
-	--	--result = min(result, sum)
-	--else
-	recursive_dfs(A, b, pivot_cols, free_vars, 1, x)
+	-- No free vars = fully determined system. Since we LCM
+	-- scaled rhs + pivot rows this is easy.
+	if nullity == 0 then
+		return pivot_total / lcm
+	else
+		local remaining = {}
+		for i = 1, #subspace.basis do
+			remaining[i] = i
+		end
+		return recursive_dfs(subspace, rhs, remaining, pivot_total)
+	end
 end
 
 local input = get_input(path)
@@ -376,50 +378,45 @@ for k, r in ipairs(input) do
 	io.write("\n")
 end
 
-for i, row in ipairs(input) do
-	local A = get_A(row)
-	local b = row.joltages
-	for r = 1, #A do
-		io.write("Row: ", r, " ", table.concat(A[r]), " | ", b[r], "\n")
-	end
-	local pivot_rows, pivot_cols, free_vars = hnf(A, b)
+for _, row in ipairs(input) do
+	local subspace = eliminate(row)
+	result = result + solve(subspace)
+	-- local A = get_A(row)
+	-- local b = row.joltages
+	-- for r = 1, #A do
+	-- 	io.write("Row: ", r, " ", table.concat(A[r]), " | ", b[r], "\n")
+	-- end
 
-	io.write("\n")
-	for r = 1, #A do
-		io.write("Row: ", r, " ", table.concat(A[r]), " | ", b[r], "\n")
-	end
-	io.write("\nPivot Rows: ")
-	for r = 1, #pivot_rows do
-		io.write(pivot_rows[r])
-		if r < #pivot_rows then
-			io.write(",")
-		end
-	end
-	io.write("\nPivot Columns: ")
-	for c = 1, #pivot_cols do
-		io.write(pivot_cols[c])
-		if c < #pivot_cols then
-			io.write(",")
-		end
-	end
-	io.write("\n", "Free variables: ")
-	for f = 1, #free_vars do
-		io.write(free_vars[f])
-		if f < #free_vars then
-			io.write(",")
-		end
-	end
-	io.write("\n", "---", "\n")
-	result = math.huge
-	local prev_result = result
-	solve(A, b, pivot_cols, free_vars)
-	if result == prev_result then
-		print(string.format("No result found for row: %d", i))
-		break
-	end
-	total_result = total_result + result
+	-- io.write("\nPivot Rows: ")
+	-- for r = 1, #pivot_rows do
+	-- 	io.write(pivot_rows[r])
+	-- 	if r < #pivot_rows then
+	-- 		io.write(",")
+	-- 	end
+	-- end
+	-- io.write("\nPivot Columns: ")
+	-- for c = 1, #pivot_cols do
+	-- 	io.write(pivot_cols[c])
+	-- 	if c < #pivot_cols then
+	-- 		io.write(",")
+	-- 	end
+	-- end
+	-- io.write("\n", "Free variables: ")
+	-- for f = 1, #free_vars do
+	-- 	io.write(free_vars[f])
+	-- 	if f < #free_vars then
+	-- 		io.write(",")
+	-- 	end
+	-- end
+	-- io.write("\n", "---", "\n")
+	-- local min_press = solve(A, b, pivot_cols, free_vars)
+	-- if not min_press then
+	-- 	print(string.format("No result found for row: %d", i))
+	-- 	break
+	-- end
+	-- total_result = total_result + min_press
 end
 
 local stop = os.clock()
-print(total_result)
+print(result)
 print(string.format("Time: %.6f", stop - start))
