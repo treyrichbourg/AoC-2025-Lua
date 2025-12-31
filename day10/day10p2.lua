@@ -13,18 +13,18 @@ local util = require("util.util")
 ---@field basis BasisV[]
 
 local start = os.clock()
-local path = "day10/example.txt"
+local path = "day10/input.txt"
 local result = 0
 
 local strip_outer = util.strip_outer
 local get_lcm = util.get_lcm
-local to_positive = util.to_positive
+local idiv = util.idiv
 local to_number = tonumber
-local floor = math.floor
-local ceil = math.ceil
 local abs = math.abs
 local min = math.min
 local max = math.max
+local floor = math.floor
+local ceil = math.ceil
 
 local function get_input(p)
 	local input = {}
@@ -90,6 +90,7 @@ local function eliminate(input)
 	end
 
 	-- adding a limit row to the bottom of A to track bounds for free_vars
+	-- when I go to recurse later
 	local limit_row = {}
 	for c = 1, columns do
 		local limit = math.huge
@@ -100,45 +101,42 @@ local function eliminate(input)
 	end
 	A[rows + 1] = limit_row
 
-	-- total row/col indexes including rhs and mod
-	local rhs_c = #A[1]
-	local limit_r = #A
-
+	local rhs_c = columns + 1
+	local limit_r = rows + 1
 	local rank = 1
 	local last = columns
-	while rank < rows and rank < last do
-		local pivot = nil
+
+	while rank <= rows and rank <= last do
+		local pivot_row = nil
 		local min_abs = math.huge
+
 		for r = rank, rows do
-			local v = A[r][rank]
-			if v ~= 0 and abs(v) < min_abs then
-				min_abs = abs(v)
-				pivot = r
+			local v = abs(A[r][rank])
+			if v ~= 0 and v < min_abs then
+				min_abs = v
+				pivot_row = r
 			end
 		end
 
-		if pivot then
-			swap_rows(A, rank, pivot)
+		if pivot_row then
+			swap_rows(A, rank, pivot_row)
 			local pv = A[rank][rank]
 			-- pivot must be positive, need to apply to
 			-- entire row + rhs
 			if pv < 0 then
-				for c = rank, rhs_c do
-					A[rank][c] = to_positive(A[rank][c])
-				end
 				pv = -pv
+				for c = rank, rhs_c do
+					A[rank][c] = -A[rank][c]
+				end
 			end
 
 			for r = 1, rows do
 				if r ~= rank then
 					local coeff = A[r][rank]
 					if coeff ~= 0 then
-						print(coeff)
-						print(pv)
-						local l = abs(coeff)
-						local lcm = get_lcm(l, pv)
-						local m = util.idiv(lcm, l)
-						local n = util.idiv(lcm / pivot * (coeff >= 0 and 1 or -1), 1)
+						local lcm = get_lcm(abs(coeff), pv)
+						local m = idiv(lcm, abs(coeff))
+						local n = idiv(lcm, pv) * (coeff > 0 and 1 or -1)
 
 						for c = 1, rhs_c do
 							A[r][c] = m * A[r][c] - n * A[rank][c]
@@ -148,14 +146,16 @@ local function eliminate(input)
 			end
 			rank = rank + 1
 		else
-			-- column permutation
-			last = last - 1
+			-- column permutation allows my dfs search to just cleanly loop
+			-- through rank indexes to solve later
 			for r = 1, limit_r do
-				A[r][rank], A[r][last + 1] = A[r][last + 1], A[r][rank]
+				A[r][rank], A[r][last] = A[r][last], A[r][rank]
 			end
+			last = last - 1
 		end
 	end
 
+	rank = rank - 1
 	-- get lcm for pivots and scale
 	local L = 1
 	for p = 1, rank do
@@ -163,8 +163,8 @@ local function eliminate(input)
 	end
 
 	for p = 1, rank do
-		local q = L / A[p][p]
-		for c = rank, rhs_c do
+		local q = idiv(L, A[p][p])
+		for c = rank + 1, rhs_c do
 			A[p][c] = A[p][c] * q
 		end
 	end
@@ -173,12 +173,12 @@ local function eliminate(input)
 	local nullity = columns - rank
 
 	local rhs = {}
-	for r = 1, rows do
+	for r = 1, rank do
 		rhs[r] = A[r][rhs_c]
 	end
 
-	-- Basis vector handles free variable permutation much cleaner
-	-- than my previous column_perm {}.
+	-- basis vector handles free variable permutation much cleaner
+	-- than my previous column_perm {}
 	local basis = {}
 	for c = 1, nullity do
 		local limit = A[limit_r][rank + c] -- original limit for free variable
@@ -190,7 +190,7 @@ local function eliminate(input)
 		for i = 1, rank do
 			sum = sum + coeffs[i]
 		end
-		local cost = L - sum
+		local cost = L - sum -- affect free_var has on the row solving for b
 		basis[#basis + 1] = {
 			limit = limit,
 			cost = cost,
@@ -198,10 +198,6 @@ local function eliminate(input)
 		}
 	end
 
-	io.write("\n")
-	for r = 1, limit_r do
-		io.write("Row: ", r, " ", table.concat(A[r]), "\n")
-	end
 	return {
 		rank = rank,
 		nullity = nullity,
@@ -211,59 +207,58 @@ local function eliminate(input)
 	}
 end
 
--- Using recursive dfs to brute force solutions using constraints
--- set by free variables after the HNF style elimination.
+-- using recursive dfs to brute force solutions using constraints
+-- set by free variables after the HNF style elimination
 ---@param subspace Subspace
 ---@param rhs number[]
 ---@param remaining number[]
 ---@param pivot_total number
 local function recursive_dfs(subspace, rhs, remaining, pivot_total)
 	local rank = subspace.rank
-	local temp_rhs = {}
-	for i = 1, #rhs do
-		temp_rhs[i] = rhs[i]
+
+	local buffered_rhs = {}
+	for i = 1, rank do
+		buffered_rhs[i] = rhs[i]
 	end
 
-	-- adjust any negative free_var coefficients
+	-- handle negativity because pain
 	for _, i in ipairs(remaining) do
-		local free_var = subspace.basis[i]
+		local b = subspace.basis[i]
 		for r = 1, rank do
-			local v = free_var.coeffs[r]
+			local v = b.coeffs[r]
 			if v < 0 then
-				temp_rhs[r] = temp_rhs[r] - v * free_var.limit
+				buffered_rhs[r] = buffered_rhs[r] - (v * b.limit)
 			end
 		end
 	end
 
-	-- using limit row to set upper/lower bounds where before I just set
-	-- arbitrarily high values to initialize.
+	-- set bounds using limit on the basis vector
 	local min_size, min_index, global_lower, global_upper = math.huge, nil, 0, 0
 	for _, i in ipairs(remaining) do
 		local free_var = subspace.basis[i]
 		local lower, upper = 0, free_var.limit
+
 		for r = 1, rank do
 			local v = free_var.coeffs[r]
-			local rhs_v = temp_rhs[r]
+			local row_req = buffered_rhs[r] + (v < 0 and (v * free_var.limit) or 0)
+
 			if v > 0 then
-				upper = min(upper, floor(rhs_v / v))
+				upper = min(upper, floor(row_req / v))
 			elseif v < 0 then
-				lower = max(lower, ceil((rhs_v + v * free_var.limit + v + 1) / v))
+				lower = max(lower, ceil(row_req / v))
 			end
 		end
-		if upper >= lower then
-			local size = upper - lower + 1
-			if size > 0 and size < min_size then
-				min_size, min_index, global_lower, global_upper = size, i, lower, upper
-			end
+
+		local size = upper - lower + 1
+		if size > 0 and size < min_size then
+			min_size, min_index, global_lower, global_upper = size, i, lower, upper
 		end
 	end
 
 	if not min_index then
-		print("failing on min_index")
 		return nil
 	end
 
-	-- adjust remaining and recurse until solved
 	local new_remaining = {}
 	for _, i in ipairs(remaining) do
 		if i ~= min_index then
@@ -273,150 +268,74 @@ local function recursive_dfs(subspace, rhs, remaining, pivot_total)
 
 	local free_var = subspace.basis[min_index]
 	local coeffs, cost, lcm = free_var.coeffs, free_var.cost, subspace.lcm
-	if #new_remaining > 0 then
-		--local adjusted_rhs = {}
-		--for r=1, rank do
-		--  adjusted_rhs[r] = temp_rhs[r] - (global_lower - 1) * coeffs[r]
-		--end
+	local best = math.huge
+
+	for n = global_lower, global_upper do
+		local next_rhs = {}
 		for r = 1, rank do
-			temp_rhs[r] = temp_rhs[r] - (global_lower - 1) * coeffs[r]
+			next_rhs[r] = rhs[r] - (n * coeffs[r])
 		end
-		local best = math.huge
-		for n = global_lower, global_upper do
-			local next_rhs = {}
-			for r = 1, rank do
-				next_rhs[r] = temp_rhs[r] - n * coeffs[r]
-			end
+
+		if #new_remaining > 0 then
 			local res = recursive_dfs(subspace, next_rhs, new_remaining, pivot_total + n * cost)
 			if res and res < best then
 				best = res
 			end
-		end
-		if best == math.huge then
-			print("failing on best")
-			return nil
-		end
-		return best
-	else
-		local iter, step
-		if cost >= 0 then
-			iter, step = global_lower, 1
 		else
-			iter, step = global_upper, -1
-		end
-		local bound = cost >= 0 and global_upper or global_lower
-		while (step > 0 and iter <= bound) or (step < 0 and iter >= bound) do
 			local ok = true
 			for r = 1, rank do
-				if (temp_rhs[r] - iter * coeffs[r]) % lcm ~= 0 then
+				if next_rhs[r] % lcm ~= 0 then
 					ok = false
 					break
 				end
 			end
 			if ok then
-				return (pivot_total + iter * cost) / lcm
+				local current_res = (pivot_total + n * cost) / lcm
+				if current_res < best then
+					best = current_res
+				end
 			end
-			iter = iter + step
 		end
-		return nil
 	end
-	-- for n = global_lower, global_upper do
-	-- 	local ok = true
-	-- 	for r = 1, rank do
-	-- 		if util.mod(temp_rhs[r] - n * coeffs[r], lcm) ~= 0 then
-	-- 			ok = false
-	-- 			break
-	-- 		end
-	-- 	end
-	-- 	if ok then
-	-- 		return (pivot_total + n * cost) / lcm
-	-- 	end
-	-- end
-	-- print("failing on else")
-	-- return nil
+
+	return best ~= math.huge and best or nil
 end
 
 ---@param subspace Subspace
 local function solve(subspace)
-	local rank = subspace.rank
 	local nullity = subspace.nullity
 	local lcm = subspace.lcm
 	local rhs = subspace.rhs
+
 	local pivot_total = 0
-	for i = 1, rank do
+	for i = 1, #rhs do
 		pivot_total = pivot_total + rhs[i]
 	end
 
-	-- No free vars = fully determined system. Since we LCM
-	-- scaled rhs + pivot rows this is easy.
 	if nullity == 0 then
-		return pivot_total / lcm
+		local res = pivot_total / lcm
+		print(string.format("Returning result for problem: %d", result))
+		return res
 	else
 		local remaining = {}
 		for i = 1, #subspace.basis do
 			remaining[i] = i
 		end
-		return recursive_dfs(subspace, rhs, remaining, pivot_total)
+		local res = recursive_dfs(subspace, rhs, remaining, pivot_total)
+		assert(res, "recursion failed because I'm dumb")
+		print(string.format("Returning result for problem: %d", result))
+		return res
 	end
 end
 
 local input = get_input(path)
-for k, r in ipairs(input) do
-	io.write(string.format("Row: %d Buttons: ", k))
-	for _, b in ipairs(r.buttons) do
-		io.write("(" .. table.concat(b, ",") .. ") ")
-	end
-	io.write(" Joltages: ")
-	for j = 1, #r.joltages do
-		io.write(r.joltages[j])
-		if j < #r.joltages then
-			io.write(",")
-		else
-			io.write("\n")
-		end
-	end
-	io.write("\n")
-end
 
-for _, row in ipairs(input) do
+for i, row in ipairs(input) do
+	print(string.format("Processing problem %d", i))
 	local subspace = eliminate(row)
 	result = result + solve(subspace)
-	-- local A = get_A(row)
-	-- local b = row.joltages
-	-- for r = 1, #A do
-	-- 	io.write("Row: ", r, " ", table.concat(A[r]), " | ", b[r], "\n")
-	-- end
-
-	-- io.write("\nPivot Rows: ")
-	-- for r = 1, #pivot_rows do
-	-- 	io.write(pivot_rows[r])
-	-- 	if r < #pivot_rows then
-	-- 		io.write(",")
-	-- 	end
-	-- end
-	-- io.write("\nPivot Columns: ")
-	-- for c = 1, #pivot_cols do
-	-- 	io.write(pivot_cols[c])
-	-- 	if c < #pivot_cols then
-	-- 		io.write(",")
-	-- 	end
-	-- end
-	-- io.write("\n", "Free variables: ")
-	-- for f = 1, #free_vars do
-	-- 	io.write(free_vars[f])
-	-- 	if f < #free_vars then
-	-- 		io.write(",")
-	-- 	end
-	-- end
-	-- io.write("\n", "---", "\n")
-	-- local min_press = solve(A, b, pivot_cols, free_vars)
-	-- if not min_press then
-	-- 	print(string.format("No result found for row: %d", i))
-	-- 	break
-	-- end
-	-- total_result = total_result + min_press
 end
 
 local stop = os.clock()
-print(result)
+print(string.format("Result: %d", result))
 print(string.format("Time: %.6f", stop - start))
